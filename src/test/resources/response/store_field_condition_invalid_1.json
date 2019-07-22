@@ -1,0 +1,11 @@
+{
+  "timestamp": "2019-07-19T22:06:31.143+0000",
+  "message": "validation failed",
+  "details": "uri=/field-conditions",
+  "validationErrors": [
+    {
+      "objectPath": "vegetation",
+      "errorMessage": "must not be null, and type is: Double"
+    }
+  ]
+}

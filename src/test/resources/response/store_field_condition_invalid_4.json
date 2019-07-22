@@ -1,0 +1,5 @@
+{
+  "timestamp": "2019-07-20T14:37:41.949+0000",
+  "message": "JSON parse error: Text '1234' could not be parsed at index 4",
+  "details": "uri=/field-conditions"
+}

@@ -1,0 +1,11 @@
+{
+  "timestamp": "2019-07-20T14:36:09.457+0000",
+  "message": "validation failed",
+  "details": "uri=/field-conditions",
+  "validationErrors": [
+    {
+      "objectPath": "occurrenceAt",
+      "errorMessage": "must not be null, and type is: Instant"
+    }
+  ]
+}

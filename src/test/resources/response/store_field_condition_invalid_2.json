@@ -1,0 +1,5 @@
+{
+  "timestamp": "2019-07-20T10:18:41.361+0000",
+  "message": "JSON parse error: Cannot deserialize value of type `java.lang.Double` from String \"foobar\": not a valid Double value",
+  "details": "uri=/field-conditions"
+}
