@@ -3,6 +3,7 @@ package com.chriniko.fc.statistics.worker;
 import com.chriniko.fc.statistics.common.MathProvider;
 import com.chriniko.fc.statistics.dto.MergedFieldConditionCapture;
 import com.chriniko.fc.statistics.dto.VegetationStatistic;
+import com.chriniko.fc.statistics.health.FieldStatisticsCalculatorHealthContext;
 import com.chriniko.fc.statistics.repository.FieldConditionRepository;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,9 +13,7 @@ import org.springframework.stereotype.Component;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.validation.constraints.NotNull;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -26,9 +25,11 @@ public class FieldStatisticsCalculator {
 
     private final MathProvider mathProvider;
 
-    private final Map<String, FieldConditionRepository> fieldConditionRepositories;
+    private final FieldConditionRepository fieldConditionRepository;
 
     private final PoolHandler poolHandler;
+
+    private final FieldStatisticsCalculatorHealthContext statisticsCalculatorHealthContext;
 
     @Value("${field-statistics.worker.initial-delay-ms}")
     private long initialDelay;
@@ -42,18 +43,17 @@ public class FieldStatisticsCalculator {
     @Value("${field-statistics.past-days}")
     private int pastDays;
 
-    @Value("${field-statistics.repository-strategy}")
-    private String repositoryStrategy;
-
     private ScheduledExecutorService scheduledExecutorService;
 
     @Autowired
-    public FieldStatisticsCalculator(Map<String, FieldConditionRepository> fieldConditionRepositories,
+    public FieldStatisticsCalculator(FieldConditionRepository fieldConditionRepository,
                                      PoolHandler poolHandler,
-                                     MathProvider mathProvider) {
-        this.fieldConditionRepositories = fieldConditionRepositories;
+                                     MathProvider mathProvider,
+                                     FieldStatisticsCalculatorHealthContext statisticsCalculatorHealthContext) {
+        this.fieldConditionRepository = fieldConditionRepository;
         this.poolHandler = poolHandler;
         this.mathProvider = mathProvider;
+        this.statisticsCalculatorHealthContext = statisticsCalculatorHealthContext;
     }
 
     @PostConstruct
@@ -81,37 +81,21 @@ public class FieldStatisticsCalculator {
 
     private void calculateFieldConditionStatisticsScheduledTask() {
         try {
-            FieldConditionRepository fieldConditionRepository = fieldConditionRepositories.get(repositoryStrategy);
 
-            List<MergedFieldConditionCapture> mergedCaptures = fieldConditionRepository.findAllMerged();
-            if (mergedCaptures.isEmpty()) {
-                return;
-            }
-
-            VegetationStatistic freshCalculation = calculateVegetationStatistic(mergedCaptures);
-            fieldConditionRepository.updateVegetationStatistics(freshCalculation);
+            VegetationStatistic vegetationStatistic = fieldConditionRepository.vegetationStatistics(pastDays);
+            fieldConditionRepository.updateVegetationStatistics(vegetationStatistic);
 
         } catch (Exception e) {
             log.error("critical error occurred during calculation of field statistics, message: " + e.getMessage(), e);
 
-            //TODO health check...
+            /*
+                Note: we should notify this error because is a scheduled job,
+                      also from Javadoc of ScheduledExecutorService: `If any execution of the task encounters an exception, subsequent executions are suppressed.`
+                      so this is the reason why we catch error(s).
+
+             */
+            statisticsCalculatorHealthContext.setError(e);
         }
-    }
-
-    private VegetationStatistic calculateVegetationStatistic(List<MergedFieldConditionCapture> mergedCaptures) {
-
-        mergedCaptures.sort(Comparator.comparing(MergedFieldConditionCapture::getDate).reversed());
-
-        log.trace("mergedCaptures.size() = {}", mergedCaptures.size());
-
-        List<MergedFieldConditionCapture> lastDaysMergedCaptures
-                = mergedCaptures.size() < pastDays
-                ? mergedCaptures
-                : mergedCaptures.subList(0, pastDays);
-
-        log.trace("lastDaysMergedCaptures.size() = {}", lastDaysMergedCaptures.size());
-
-        return extractStatistic(lastDaysMergedCaptures);
     }
 
     private VegetationStatistic extractStatistic(List<MergedFieldConditionCapture> captures) {

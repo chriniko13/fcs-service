@@ -1,7 +1,6 @@
 package com.chriniko.fc.statistics.repository;
 
 import com.chriniko.fc.statistics.dto.FieldConditionCapture;
-import com.chriniko.fc.statistics.dto.MergedFieldConditionCapture;
 import com.chriniko.fc.statistics.dto.VegetationStatistic;
 
 import java.util.List;
@@ -12,9 +11,11 @@ public interface FieldConditionRepository {
 
     List<FieldConditionCapture> findAll();
 
-    List<MergedFieldConditionCapture> findAllMerged();
+    int noOfRecords();
 
-    VegetationStatistic vegetationStatistics();
+    VegetationStatistic cachedVegetationStatistics();
+
+    VegetationStatistic vegetationStatistics(int pastDays);
 
     void updateVegetationStatistics(VegetationStatistic statistic);
 

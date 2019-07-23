@@ -1,5 +1,5 @@
 {
   "timestamp": "2019-07-20T14:37:41.949+0000",
-  "message": "Text '1234' could not be parsed at index 4",
+  "message": "Text '2019-04-23 08:50' could not be parsed at index 10",
   "details": "uri=/field-conditions"
 }

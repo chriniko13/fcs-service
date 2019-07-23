@@ -18,4 +18,6 @@ public class FieldConditionCapturePoint {
 
     @Column(name = "vegetation")
     private Double vegetation;
+
 }
+

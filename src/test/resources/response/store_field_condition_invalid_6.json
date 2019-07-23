@@ -1,0 +1,5 @@
+{
+  "timestamp": "2019-07-19T22:06:31.143+0000",
+  "message": "provided vegetation should not be negative.",
+  "details": "uri=/field-conditions"
+}

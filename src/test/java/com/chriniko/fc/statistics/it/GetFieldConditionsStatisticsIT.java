@@ -85,7 +85,7 @@ public class GetFieldConditionsStatisticsIT extends Specification {
 
 
         Awaitility.await()
-                .atMost(15, TimeUnit.SECONDS)
+                .atMost(10, TimeUnit.SECONDS)
                 .untilAsserted(() -> {
 
                     // when

@@ -37,11 +37,43 @@ public class CustomizedResponseEntityExceptionHandler extends ResponseEntityExce
         return new ResponseEntity<>(errorDetails, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
+    @ExceptionHandler(BusinessValidationException.class)
+    public final ResponseEntity<ErrorDetails> handleBusinessValidationException(BusinessValidationException ex,
+                                                                                WebRequest request) {
+
+        log.error(">> handleBusinessValidationException error occurred: " + ex.getMessage());
+
+        ErrorDetails errorDetails = new ErrorDetails(
+                new Date(),
+                ex.getMessage(),
+                request.getDescription(false)
+        );
+
+        return new ResponseEntity<>(errorDetails, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(BusinessProcessingException.class)
+    public final ResponseEntity<ErrorDetails> handleBusinessProcessingException(BusinessProcessingException ex,
+                                                                                WebRequest request) {
+
+        log.error(">> handleBusinessProcessingException error occurred: " + ex.getMessage());
+
+        ErrorDetails errorDetails = new ErrorDetails(
+                new Date(),
+                ex.getMessage(),
+                request.getDescription(false)
+        );
+
+        return new ResponseEntity<>(errorDetails, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
                                                                   HttpHeaders headers,
                                                                   HttpStatus status,
                                                                   WebRequest request) {
+
+        log.error(">> handleMethodArgumentNotValid error occurred: " + ex.getMessage());
 
         ErrorDetails errorDetails = new ErrorDetails(
                 new Date(),
@@ -90,11 +122,13 @@ public class CustomizedResponseEntityExceptionHandler extends ResponseEntityExce
                                                                   HttpStatus status,
                                                                   WebRequest request) {
 
-        String msg = "not valid type for an attribute provided";
-        try {
-            msg = ex.getMessage().split(";")[0];
-        } catch (Exception ignored) {
-            log.error("could not more specific error message for provided type");
+        log.error(">> handleHttpMessageNotReadable error occurred: " + ex.getMessage());
+
+        Throwable error = unwrap(ex.getCause());
+        String msg = error.getMessage();
+
+        if (msg.contains("\n")) {
+            msg = msg.split("\n")[0];
         }
 
         ErrorDetails errorDetails = new ErrorDetails(
@@ -104,5 +138,15 @@ public class CustomizedResponseEntityExceptionHandler extends ResponseEntityExce
         );
 
         return new ResponseEntity<>(errorDetails, HttpStatus.BAD_REQUEST);
+    }
+
+    // ---- internals ----
+
+    private Throwable unwrap(Throwable input) {
+        Throwable walker = input;
+        while (walker.getCause() != null) {
+            walker = walker.getCause();
+        }
+        return walker;
     }
 }

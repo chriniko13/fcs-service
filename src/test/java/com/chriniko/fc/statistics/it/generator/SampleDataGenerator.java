@@ -1,11 +1,12 @@
 package com.chriniko.fc.statistics.it.generator;
 
+import com.chriniko.fc.statistics.common.MathProvider;
 import com.chriniko.fc.statistics.dto.FieldConditionCapture;
 import com.chriniko.fc.statistics.dto.FieldStatistics;
-import com.chriniko.fc.statistics.dto.MergedFieldConditionCapture;
+import com.chriniko.fc.statistics.dto.VegetationStatistic;
+import com.chriniko.fc.statistics.it.core.ConfigIT;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import javax.validation.constraints.NotNull;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -15,9 +16,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.time.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.DoubleSummaryStatistics;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class SampleDataGenerator {
+
+    private static final Instant INSTANT_FOR_TESTING = Instant.parse(ConfigIT.TIME_POINT_FOR_TESTING);
+    private static final ZonedDateTime NOW = ZonedDateTime.ofInstant(INSTANT_FOR_TESTING, ZoneOffset.UTC);
 
     public static void main(String[] args) throws Exception {
         generate();
@@ -27,52 +35,74 @@ public class SampleDataGenerator {
         // Note: change based on your machine.
         String pathToCreateFiles = "/home/chriniko/Desktop";
 
+        MathProvider mathProvider = new MathProvider();
+
         // Note: generate random captures.
         List<FieldConditionCapture> captures = generateRandomCaptures();
 
+        // Note: calculate statistics.
+        DoubleSummaryStatistics summaryStatistics = captures
+                .stream()
+                .sorted(Comparator.comparing(FieldConditionCapture::getOccurrenceAt).reversed())
+                .filter(fC -> {
+                    LocalDate date = ZonedDateTime.ofInstant(fC.getOccurrenceAt(), ZoneOffset.UTC).toLocalDate();
 
-        // Note: group captures by date
-        Map<LocalDate, List<FieldConditionCapture>> capturesGroupByDate = groupCapturesByDate(captures);
+                    LocalDate nowLocalDate = LocalDate.now(Clock.system(NOW.getZone()));
 
-        // Note: merge captures by date
-        List<MergedFieldConditionCapture> mergedCapturesByDate = mergeCapturesByDate(capturesGroupByDate);
+                    long daysDiff = Duration.between(
+                            date.atStartOfDay(),
+                            nowLocalDate.atStartOfDay()
+                    ).toDays();
 
+                    return daysDiff >= 0 && daysDiff <= 30;
+                })
+                .mapToDouble(FieldConditionCapture::getVegetation)
+                .summaryStatistics();
 
-        // Note: calculate vegetation statistics (min, max, avg) of last N days.
-        FieldStatistics statistics = calculateStatistics(mergedCapturesByDate);
+        double min = mathProvider.scale(summaryStatistics.getMin(), 2);
+        double max = mathProvider.scale(summaryStatistics.getMax(), 2);
+        double avg = mathProvider.scale(summaryStatistics.getAverage(), 2);
+
+        System.out.println("min is: " + min);
+        System.out.println("max is: " + max);
+        System.out.println("avg is: " + avg);
+
+        VegetationStatistic vegetationStatistic = new VegetationStatistic(min, max, avg);
+
+        FieldStatistics statistics = new FieldStatistics();
+        statistics.setVegetation(vegetationStatistic);
 
         // Note: time to write the input and output to files.
         createInputAndOutputFile(pathToCreateFiles, captures, statistics);
     }
 
     private static List<FieldConditionCapture> generateRandomCaptures() {
-        int noOfCaptures = 100;
+        int noOfCaptures = 200;
 
         int noOfCapturesForSameTime = 10;
         int noOfCapturesForDifferentTime = 10;
 
-
-        int dayIncrement = 1;
+        int daysDecrease = 1;
         int maxSecondsDiff = 240;
 
-
         SecureRandom r = new SecureRandom();
-        ZonedDateTime now = ZonedDateTime.now(Clock.systemUTC());
 
         List<FieldConditionCapture> captures = new ArrayList<>(noOfCaptures);
 
         for (int i = 1; i <= noOfCaptures; i++) {
 
-            int plusSeconds = r.nextInt(maxSecondsDiff) + 1;
-            ZonedDateTime randomOccurrenceAt = now.plusDays(dayIncrement);
+            int secondsDecrease = r.nextInt(maxSecondsDiff) + 1;
+            ZonedDateTime randomOccurrenceAt = NOW.minusDays(daysDecrease);
 
             // Note: random vegetation captures with same occurrence time.
             for (int k = 1; k <= noOfCapturesForSameTime; k++) {
 
                 FieldConditionCapture capture = new FieldConditionCapture();
 
+                double v = ThreadLocalRandom.current().nextDouble(0.03, 0.98);
+
                 double randomVegetation = BigDecimal
-                        .valueOf(r.nextDouble())
+                        .valueOf(v)
                         .setScale(2, RoundingMode.HALF_UP)
                         .doubleValue();
 
@@ -88,112 +118,24 @@ public class SampleDataGenerator {
 
                 FieldConditionCapture capture = new FieldConditionCapture();
 
+                double v = ThreadLocalRandom.current().nextDouble(0.03, 0.98);
+
                 double randomVegetation = BigDecimal
-                        .valueOf(r.nextDouble())
+                        .valueOf(v)
                         .setScale(2, RoundingMode.HALF_UP)
                         .doubleValue();
 
                 capture.setVegetation(randomVegetation);
 
-                ZonedDateTime time = now.plusDays(dayIncrement).plusSeconds(plusSeconds);
+                ZonedDateTime time = NOW.minusDays(daysDecrease).minusSeconds(secondsDecrease);
                 capture.setOccurrenceAt(time.toInstant());
-
 
                 captures.add(capture);
             }
 
-            dayIncrement++;
+            daysDecrease++;
         }
         return captures;
-    }
-
-    private static Map<LocalDate, List<FieldConditionCapture>> groupCapturesByDate(List<FieldConditionCapture> captures) {
-        Map<LocalDate, List<FieldConditionCapture>> capturesGroupByDate = new LinkedHashMap<>();
-
-        for (FieldConditionCapture capture : captures) {
-
-            @NotNull Instant occurrenceAt = capture.getOccurrenceAt();
-            LocalDate localDate = ZonedDateTime.ofInstant(occurrenceAt, ZoneId.of("UTC")).toLocalDate();
-
-            List<FieldConditionCapture> fieldConditionCaptures = capturesGroupByDate.get(localDate);
-            if (fieldConditionCaptures == null) {
-
-                List<FieldConditionCapture> l = new LinkedList<>();
-                l.add(capture);
-                capturesGroupByDate.put(localDate, l);
-
-            } else {
-                fieldConditionCaptures.add(capture);
-            }
-        }
-        return capturesGroupByDate;
-    }
-
-    private static List<MergedFieldConditionCapture> mergeCapturesByDate(Map<LocalDate, List<FieldConditionCapture>> capturesGroupByDate) {
-        List<MergedFieldConditionCapture> mergedCapturesByDate = new LinkedList<>();
-
-        for (Map.Entry<LocalDate, List<FieldConditionCapture>> entry : capturesGroupByDate.entrySet()) {
-
-            LocalDate key = entry.getKey();
-
-            List<FieldConditionCapture> cS = entry.getValue();
-
-            double sum = 0.0D;
-            for (FieldConditionCapture c : cS) {
-                sum += c.getVegetation();
-            }
-
-            double avg = BigDecimal
-                    .valueOf(sum)
-                    .divide(BigDecimal.valueOf(cS.size()), 2, RoundingMode.HALF_UP)
-                    .doubleValue();
-
-            MergedFieldConditionCapture mergedFieldConditionCapture = new MergedFieldConditionCapture(key, avg);
-            mergedCapturesByDate.add(mergedFieldConditionCapture);
-        }
-        return mergedCapturesByDate;
-    }
-
-    private static FieldStatistics calculateStatistics(List<MergedFieldConditionCapture> mergedCapturesByDate) {
-        int lastDays = 30;
-
-        mergedCapturesByDate.sort(Comparator.comparing(MergedFieldConditionCapture::getDate).reversed());
-
-        List<MergedFieldConditionCapture> latestCaptures = mergedCapturesByDate.size() < lastDays
-                ? mergedCapturesByDate
-                : mergedCapturesByDate.subList(0, lastDays);
-
-        double max = Double.MIN_VALUE;
-        double min = Double.MAX_VALUE;
-        double sum = 0.0D;
-
-        for (MergedFieldConditionCapture capture : latestCaptures) {
-
-            @NotNull Double vegetation = capture.getVegetation();
-            if (vegetation < min) {
-                min = vegetation;
-            }
-            if (vegetation > max) {
-                max = vegetation;
-            }
-            sum += vegetation;
-        }
-
-        double avg = BigDecimal
-                .valueOf(sum)
-                .divide(BigDecimal.valueOf(lastDays), 2, RoundingMode.HALF_UP)
-                .doubleValue();
-
-        System.out.println("min is: " + min);
-        System.out.println("max is: " + max);
-        System.out.println("avg is: " + avg);
-
-
-        FieldStatistics statistics = new FieldStatistics();
-        statistics.getVegetation().setMin(min);
-        statistics.getVegetation().setMax(max);
-        statistics.getVegetation().setAvg(avg);
-        return statistics;
     }
 
     private static void createInputAndOutputFile(String pathToCreateFiles, List<FieldConditionCapture> captures, FieldStatistics statistics) throws IOException {
@@ -227,5 +169,4 @@ public class SampleDataGenerator {
             bufferedWriter.flush();
         }
     }
-
 }

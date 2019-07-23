@@ -15,4 +15,12 @@ public class MathProvider {
                 .doubleValue();
     }
 
+    public double scale(double input, int scale) {
+        return BigDecimal
+                .valueOf(input)
+                .setScale(scale, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
+
 }
