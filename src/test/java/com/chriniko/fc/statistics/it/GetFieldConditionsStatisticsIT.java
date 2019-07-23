@@ -11,7 +11,6 @@ import org.awaitility.Awaitility;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.skyscreamer.jsonassert.JSONAssert;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.web.server.LocalServerPort;
@@ -37,6 +36,8 @@ import java.util.stream.Collectors;
 
 @RunWith(SpringRunner.class)
 public class GetFieldConditionsStatisticsIT extends Specification {
+
+    private static final double DELTA = 1e-15;
 
     @LocalServerPort
     private int port;
@@ -66,7 +67,6 @@ public class GetFieldConditionsStatisticsIT extends Specification {
                         String url = getBaseUrl(port);
 
                         try {
-
                             ResponseEntity<Void> responseEntity = restTemplate.exchange(url, HttpMethod.POST, httpEntity, Void.class);
                             Assert.assertEquals(HttpStatus.OK, responseEntity.getStatusCode());
                         } catch (Exception e) {
@@ -85,22 +85,24 @@ public class GetFieldConditionsStatisticsIT extends Specification {
 
 
         Awaitility.await()
-                .atMost(15, TimeUnit.SECONDS)
+                .atMost(30, TimeUnit.SECONDS)
                 .untilAsserted(() -> {
 
                     // when
                     ResponseEntity<FieldStatistics> responseEntity = restTemplate.exchange(getBaseUrl(port), HttpMethod.GET, null, FieldStatistics.class);
 
-
                     // then
                     Assert.assertEquals(HttpStatus.OK, responseEntity.getStatusCode());
 
                     FieldStatistics fieldStatistics = responseEntity.getBody();
-                    String actual = objectMapper.writeValueAsString(fieldStatistics);
-                    String expected = FileSupport.read("response/get_field_conditions_statistics_1.json");
 
+                    String expectedAsString = FileSupport.read("response/get_field_conditions_statistics_1.json");
+                    FieldStatistics expected = objectMapper.readValue(expectedAsString, FieldStatistics.class);
 
-                    JSONAssert.assertEquals(expected, actual, true);
+                    Assert.assertEquals(expected.getVegetation().getMin(), fieldStatistics.getVegetation().getMin(), DELTA);
+                    Assert.assertEquals(expected.getVegetation().getMax(), fieldStatistics.getVegetation().getMax(), DELTA);
+                    Assert.assertEquals(expected.getVegetation().getAvg(), fieldStatistics.getVegetation().getAvg(), DELTA);
+
                 });
 
 

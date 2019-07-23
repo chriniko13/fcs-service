@@ -12,7 +12,11 @@ public interface FieldConditionRepository {
 
     List<FieldConditionCapture> findAll();
 
-    List<MergedFieldConditionCapture> findAllMerged();
+    List<MergedFieldConditionCapture> findAllMergedOrderByOccurrenceDesc(int pastDays);
+
+    int noOfMergedRecords();
+
+    int noOfRecords();
 
     VegetationStatistic vegetationStatistics();
 

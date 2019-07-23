@@ -6,18 +6,14 @@ import com.chriniko.fc.statistics.dto.FieldConditionCapture;
 import com.chriniko.fc.statistics.it.core.FileSupport;
 import com.chriniko.fc.statistics.it.core.Specification;
 import com.chriniko.fc.statistics.repository.FieldConditionRepository;
-import com.chriniko.fc.statistics.service.FieldConditionService;
-import com.chriniko.fc.statistics.worker.FieldStatisticsCalculator;
 import lombok.Getter;
-import org.joor.Reflect;
+import org.awaitility.Awaitility;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.web.server.LocalServerPort;
-import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -26,7 +22,6 @@ import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
@@ -48,26 +43,7 @@ public class FieldConditionCaptureWithMemoRepoIT extends Specification {
     private RestTemplate restTemplate;
 
     @Autowired
-    private Map<String, FieldConditionRepository> fieldConditionRepositories;
-
     private FieldConditionRepository fieldConditionRepository;
-
-    @Autowired
-    private ApplicationContext applicationContext;
-
-
-    @Before
-    public void setup() {
-        String repoToUse = "memoRepo";
-
-        fieldConditionRepository = fieldConditionRepositories.get(repoToUse);
-
-        Reflect.on(applicationContext.getBean(FieldStatisticsCalculator.class))
-                .set("repositoryStrategy", repoToUse);
-
-        Reflect.on(applicationContext.getBean(FieldConditionService.class))
-                .set("repositoryStrategy", repoToUse);
-    }
 
     @Test
     public void one_capture_case() {
@@ -128,7 +104,7 @@ public class FieldConditionCaptureWithMemoRepoIT extends Specification {
         // given
         fieldConditionRepository.clear();
 
-        int clients = 50;
+        int clients = 150;
         int capturesPerClient = 3;
 
         // when
@@ -136,15 +112,24 @@ public class FieldConditionCaptureWithMemoRepoIT extends Specification {
                 = new MultipleClientsOperation(clients, capturesPerClient, "request/store_field_condition_1.json")
                 .invoke();
 
-        boolean reachedZero = multipleClientsOperation.getLatch().await(15, TimeUnit.SECONDS);
+        boolean reachedZero = multipleClientsOperation.getLatch().await(25, TimeUnit.SECONDS);
         if (!reachedZero) {
             throw new IllegalStateException("multiple clients operation not successful");
         }
 
 
         // then
-        List<FieldConditionCapture> records = fieldConditionRepository.findAll();
-        Assert.assertEquals(clients * capturesPerClient, records.size());
+        Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> {
+            List<FieldConditionCapture> records = fieldConditionRepository.findAll();
+            int recordsSize = records.size();
+            try {
+                Assert.assertEquals(clients * capturesPerClient, recordsSize);
+                return true;
+            } catch (AssertionError e) {
+                System.err.println("total records are: " + recordsSize);
+                return false;
+            }
+        });
 
         // clear
         ForkJoinPool pool = multipleClientsOperation.getPool();

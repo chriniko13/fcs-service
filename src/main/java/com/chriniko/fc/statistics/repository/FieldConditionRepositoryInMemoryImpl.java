@@ -4,21 +4,27 @@ import com.chriniko.fc.statistics.common.MathProvider;
 import com.chriniko.fc.statistics.dto.FieldConditionCapture;
 import com.chriniko.fc.statistics.dto.MergedFieldConditionCapture;
 import com.chriniko.fc.statistics.dto.VegetationStatistic;
+import com.chriniko.fc.statistics.error.BusinessProcessingException;
+import com.google.common.collect.Lists;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 
 import javax.validation.constraints.NotNull;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /*
-    Note: this repository and worker implementation embraces/uses weakly consistent iterators.
+    Note: this repository and worker implementation embraces/uses weakly consistent iterators
+          (we sacrifice a little bit consistency for having scalability, otherwise we will need to use read/write locks during operations which
+          take place on field: `ConcurrentHashMap<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> capturesGroupByDate`).
  */
 
 @Log4j2
@@ -27,9 +33,13 @@ import java.util.stream.Collectors;
 public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepository {
 
     private final MathProvider mathProvider;
-    private final Map<LocalDate, Deque<FieldConditionCapture>> capturesGroupByDate;
+    private final ConcurrentHashMap<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> capturesGroupByDate;
 
-    private final ZoneId utcZone;
+    private final Clock clock;
+    private final ExecutorService computationWorkers;
+
+    @Value("${memoRepo.merged-captures.single-thread-approach}")
+    private final boolean mergedCapturesCalcSingleThreadApproach;
 
     /*
         Note: Need for atomicity (atomic actions) is for multiple writers, in our case we have one writer (which is scheduler/statistics calculator worker)
@@ -41,10 +51,15 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
 
 
     @Autowired
-    public FieldConditionRepositoryInMemoryImpl(MathProvider mathProvider) {
-        capturesGroupByDate = new ConcurrentHashMap<>();
-        utcZone = ZoneId.of("UTC");
+    public FieldConditionRepositoryInMemoryImpl(MathProvider mathProvider,
+                                                Clock clock,
+                                                @Qualifier("computation-workers") ExecutorService computationWorkers,
+                                                @Value("${memoRepo.merged-captures.single-thread-approach}") boolean mergedCapturesCalcSingleThreadApproach) {
+        this.clock = clock;
+        this.mergedCapturesCalcSingleThreadApproach = mergedCapturesCalcSingleThreadApproach;
+        this.capturesGroupByDate = new ConcurrentHashMap<>();
         this.mathProvider = mathProvider;
+        this.computationWorkers = computationWorkers;
     }
 
     @Override
@@ -55,21 +70,19 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
     @Override
     public void save(FieldConditionCapture capture) {
 
-        @NotNull Instant key = capture.getOccurrenceAt();
+        @NotNull Instant occurrenceAt = capture.getOccurrenceAt();
+        LocalDate localDate = occurrenceAt.atZone(clock.getZone()).toLocalDate();
 
-        LocalDate localDate = key.atZone(utcZone).toLocalDate();
-
-        capturesGroupByDate.computeIfPresent(localDate, (instant, fieldConditionCaptures) -> {
-            fieldConditionCaptures.add(capture);
-            return fieldConditionCaptures;
+        capturesGroupByDate.compute(localDate, (_occurrenceAt, _captures) -> {
+            if (_captures == null) {
+                _captures = new ConcurrentLinkedDeque<>();
+                _captures.add(capture);
+                return _captures;
+            } else {
+                _captures.add(capture);
+                return _captures;
+            }
         });
-
-        capturesGroupByDate.computeIfAbsent(localDate, instant -> {
-            ConcurrentLinkedDeque<FieldConditionCapture> captures = new ConcurrentLinkedDeque<>();
-            captures.add(capture);
-            return captures;
-        });
-
     }
 
     @Override
@@ -82,57 +95,142 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
     }
 
     @Override
-    public List<MergedFieldConditionCapture> findAllMerged() {
-        return calculateMergedCaptures(capturesGroupByDate);
-    }
-
-    @Override
     public VegetationStatistic vegetationStatistics() {
         return vegetationStatistic;
     }
 
     @Override
     public void updateVegetationStatistics(VegetationStatistic statistic) {
-        vegetationStatistic.setMin(statistic.getMin());
-        vegetationStatistic.setMax(statistic.getMax());
-        vegetationStatistic.setAvg(statistic.getAvg());
+        vegetationStatistic = statistic;
     }
 
-
-    //TODO extract to property...
-    private static boolean SINGLE_THREAD_APPROACH = true;
-
-    private List<MergedFieldConditionCapture> calculateMergedCaptures(Map<LocalDate, Deque<FieldConditionCapture>> capturesGroupByDate) {
+    @Override
+    public List<MergedFieldConditionCapture> findAllMergedOrderByOccurrenceDesc(int pastDays) {
         if (capturesGroupByDate.isEmpty()) {
             return Collections.emptyList();
         }
 
-        if (SINGLE_THREAD_APPROACH) {
+        long startTime = System.nanoTime();
 
-            final List<MergedFieldConditionCapture> mergedCaptures = new LinkedList<>();
+        final List<MergedFieldConditionCapture> mergedFieldConditionCaptures;
 
-            for (Map.Entry<LocalDate, Deque<FieldConditionCapture>> entry : capturesGroupByDate.entrySet()) {
+        MergedCapturesCalculationStrategy calculationStrategy;
+        if (mergedCapturesCalcSingleThreadApproach) {
+            calculationStrategy = new MergedCapturesCalculationSingleThreadStrategy();
+        } else {
+            calculationStrategy = new MergedCapturesCalculationMultiThreadStrategy();
+        }
+        mergedFieldConditionCaptures = calculationStrategy.calculateMergedCaptures();
 
-                LocalDate date = entry.getKey();
-                Deque<FieldConditionCapture> captures = entry.getValue();
-                int noOfRecords = captures.size();
+        List<MergedFieldConditionCapture> result = mergedFieldConditionCaptures
+                .stream()
+                .sorted(Comparator.comparing(MergedFieldConditionCapture::getDate).reversed())
+                .filter(fC -> {
+                    LocalDate nowLocalDate = LocalDate.now(clock);
 
-                double sum = 0.0D;
-                for (FieldConditionCapture capture : captures) {
-                    sum += capture.getVegetation();
-                }
-                double avg = mathProvider.getAvg(noOfRecords, sum);
+                    long daysDiff = Duration
+                            .between(
+                                    fC.getDate().atStartOfDay(),
+                                    nowLocalDate.atStartOfDay()
+                            ).toDays();
 
-                MergedFieldConditionCapture merged = new MergedFieldConditionCapture(date, avg);
+                    return daysDiff >= 0 && daysDiff <= pastDays;
+                })
+                .collect(Collectors.toList());
+
+        long totalTime = System.nanoTime() - startTime;
+        log.trace("total time took to calculate findAllMergedOrderByOccurrenceDesc---multithread: "
+                + !mergedCapturesCalcSingleThreadApproach
+                + ", in ms: "
+                + TimeUnit.MILLISECONDS.convert(totalTime, TimeUnit.NANOSECONDS)
+        );
+
+        return result;
+    }
+
+    @Override
+    public int noOfMergedRecords() {
+        return capturesGroupByDate.size();
+    }
+
+    @Override
+    public int noOfRecords() {
+        return capturesGroupByDate.entrySet().stream().mapToInt(c -> c.getValue().size()).sum();
+    }
+
+    // ------ internals ------
+
+    abstract class MergedCapturesCalculationStrategy {
+        protected abstract List<MergedFieldConditionCapture> calculateMergedCaptures();
+
+        MergedFieldConditionCapture calculateMergedCapture(Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry) {
+
+            LocalDate date = entry.getKey();
+            Deque<FieldConditionCapture> captures = entry.getValue();
+
+            double avg = captures.stream().mapToDouble(FieldConditionCapture::getVegetation).average().orElse(0.0D);
+            avg = mathProvider.scale(avg, 2);
+
+            return new MergedFieldConditionCapture(date, avg);
+        }
+    }
+
+    final class MergedCapturesCalculationSingleThreadStrategy extends MergedCapturesCalculationStrategy {
+
+        @Override
+        public List<MergedFieldConditionCapture> calculateMergedCaptures() {
+            final LinkedList<MergedFieldConditionCapture> mergedCaptures = new LinkedList<>();
+
+            for (Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry : capturesGroupByDate.entrySet()) {
+                MergedFieldConditionCapture merged = calculateMergedCapture(entry);
                 mergedCaptures.add(merged);
             }
 
             return mergedCaptures;
+        }
+    }
 
-        } else {
+    final class MergedCapturesCalculationMultiThreadStrategy extends MergedCapturesCalculationStrategy {
 
-            throw new UnsupportedOperationException("TODO");
+        private static final long WAIT_TIME_FOR_CALC_IN_MS = 200;
+        private static final int PARTITION_SIZE = 10;
 
+        @Override
+        public List<MergedFieldConditionCapture> calculateMergedCaptures() {
+            final ConcurrentLinkedDeque<MergedFieldConditionCapture> mergedCaptures = new ConcurrentLinkedDeque<>();
+
+            List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>> capturesToProcess = new ArrayList<>(capturesGroupByDate.entrySet());
+
+            List<List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>>> capturesToProcessPerWorker = Lists.partition(capturesToProcess, PARTITION_SIZE);
+
+            CountDownLatch calculationFinished = new CountDownLatch(capturesToProcessPerWorker.size());
+
+            for (List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>> capturesByDate : capturesToProcessPerWorker) {
+
+                Runnable workerTask = () -> {
+                    for (Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry : capturesByDate) {
+                        MergedFieldConditionCapture merged = calculateMergedCapture(entry);
+                        mergedCaptures.add(merged);
+                    }
+                    calculationFinished.countDown();
+                };
+
+                computationWorkers.submit(workerTask);
+            }
+
+            boolean reachedZero = false;
+            try {
+                reachedZero = calculationFinished.await(WAIT_TIME_FOR_CALC_IN_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                if (!Thread.currentThread().isInterrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw new BusinessProcessingException("processing of merged captures failed", e);
+                }
+            }
+            if (!reachedZero) {
+                throw new BusinessProcessingException("processing of merged captures failed");
+            }
+            return new LinkedList<>(mergedCaptures);
         }
     }
 

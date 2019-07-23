@@ -8,10 +8,10 @@ import java.math.RoundingMode;
 @Component
 public class MathProvider {
 
-    public double getAvg(int noOfRecords, double sum) {
+    public double scale(double v, int scale) {
         return BigDecimal
-                .valueOf(sum)
-                .divide(BigDecimal.valueOf(noOfRecords), 2, RoundingMode.HALF_UP)
+                .valueOf(v)
+                .setScale(scale, RoundingMode.HALF_UP)
                 .doubleValue();
     }
 
