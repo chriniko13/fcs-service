@@ -50,7 +50,7 @@ which take place on repository code fields (`ConcurrentHashMap<LocalDate, Concur
 * Two options:
     * Execute: 
         * `mvn clean install -DskipUTs=true -DskipITs`
-        * `java -jar -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector target/itineraries-lookup-service-1.0.0-SNAPSHOT.jar`
+        * `java -jar -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector target/field-condition-statistics-service-1.0-SNAPSHOT.jar`
                 
     * Execute:
         * `mvn spring-boot:run -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector`
