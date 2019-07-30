@@ -60,11 +60,11 @@ we have used as a tag, a virtual `sensor-id` which is a random UUID.
     * `select sum(vegetation) / count(vegetation) from field_condition_capture where time >= now() - 30d and  time <= now();`
     
 
-#### How to run service
+#### How to run service (you should run docker-compose up first - needs InfluxDB)
 * Two options:
     * Execute: 
         * `mvn clean install -DskipUTs=true -DskipITs`
-        * `java -jar -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector target/itineraries-lookup-service-1.0.0-SNAPSHOT.jar`
+        * `java -jar -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector target/field-condition-statistics-service-1.0-SNAPSHOT.jar`
                 
     * Execute:
         * `mvn spring-boot:run -Dspring.profiles.active=dev -DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector`
