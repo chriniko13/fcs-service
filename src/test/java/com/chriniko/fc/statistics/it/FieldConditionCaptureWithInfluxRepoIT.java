@@ -64,10 +64,13 @@ public class FieldConditionCaptureWithInfluxRepoIT extends Specification {
         Assert.assertEquals(HttpStatus.OK, responseEntity.getStatusCode());
 
 
-        Awaitility.await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            List<FieldConditionCapture> records = fieldConditionRepository.findAll();
-            Assert.assertEquals(1, records.size());
-        });
+        Awaitility.await()
+                .atMost(10, TimeUnit.SECONDS)
+                .untilAsserted(() -> {
+                    List<FieldConditionCapture> records = fieldConditionRepository.findAll();
+                    System.out.println(Thread.currentThread().getName() + " --- " + records.size());
+                    Assert.assertEquals(1, records.size());
+                });
 
     }
 

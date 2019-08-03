@@ -37,6 +37,9 @@ public class FieldConditionRepositoryInfluxDBImpl implements FieldConditionRepos
     private static final String DB_NAME = "field_captures";
     private static final String RETENTION_POLICY = "defaultPolicy";
 
+    // Important Note: watch out for this if tests are failing, because occurrenceAt is very 'old', so are not stored to InfluxDB.
+    private static final String RETENTION_POLICY_PERIOD = "300d";
+
     private final MathProvider mathProvider;
     private final Clock utcClock;
 
@@ -96,7 +99,10 @@ public class FieldConditionRepositoryInfluxDBImpl implements FieldConditionRepos
         influxDB.query(new Query("CREATE DATABASE " + DB_NAME, DB_NAME));
         influxDB.setDatabase(DB_NAME);
 
-        influxDB.query(new Query("CREATE RETENTION POLICY " + RETENTION_POLICY + " ON " + DB_NAME + " DURATION 100d REPLICATION 1 SHARD DURATION 30m DEFAULT", DB_NAME));
+        influxDB.query(new Query("CREATE RETENTION POLICY " + RETENTION_POLICY
+                + " ON " + DB_NAME
+                + " DURATION " + RETENTION_POLICY_PERIOD
+                + " REPLICATION 1 SHARD DURATION 30m DEFAULT", DB_NAME));
         influxDB.setRetentionPolicy(RETENTION_POLICY);
 
         influxDB.enableBatch(

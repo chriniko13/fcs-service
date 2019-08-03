@@ -1,7 +1,5 @@
 package com.chriniko.fc.statistics.worker;
 
-import com.chriniko.fc.statistics.common.MathProvider;
-import com.chriniko.fc.statistics.dto.MergedFieldConditionCapture;
 import com.chriniko.fc.statistics.dto.VegetationStatistic;
 import com.chriniko.fc.statistics.health.FieldStatisticsCalculatorHealthContext;
 import com.chriniko.fc.statistics.repository.FieldConditionRepository;
@@ -12,8 +10,6 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
-import javax.validation.constraints.NotNull;
-import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -22,8 +18,6 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 public class FieldStatisticsCalculator {
-
-    private final MathProvider mathProvider;
 
     private final FieldConditionRepository fieldConditionRepository;
 
@@ -48,11 +42,9 @@ public class FieldStatisticsCalculator {
     @Autowired
     public FieldStatisticsCalculator(FieldConditionRepository fieldConditionRepository,
                                      PoolHandler poolHandler,
-                                     MathProvider mathProvider,
                                      FieldStatisticsCalculatorHealthContext statisticsCalculatorHealthContext) {
         this.fieldConditionRepository = fieldConditionRepository;
         this.poolHandler = poolHandler;
-        this.mathProvider = mathProvider;
         this.statisticsCalculatorHealthContext = statisticsCalculatorHealthContext;
     }
 
@@ -96,28 +88,6 @@ public class FieldStatisticsCalculator {
              */
             statisticsCalculatorHealthContext.setError(e);
         }
-    }
-
-    private VegetationStatistic extractStatistic(List<MergedFieldConditionCapture> captures) {
-
-        double min = Double.MAX_VALUE;
-        double max = Double.MIN_VALUE;
-        double sum = 0.0D;
-
-        for (MergedFieldConditionCapture capture : captures) {
-            @NotNull Double vegetation = capture.getVegetation();
-            if (vegetation < min) {
-                min = vegetation;
-            }
-            if (vegetation > max) {
-                max = vegetation;
-            }
-            sum += vegetation;
-        }
-
-        double avg = mathProvider.getAvg(captures.size(), sum);
-
-        return new VegetationStatistic(min, max, avg);
     }
 
     private void clearResources() {
