@@ -37,11 +37,11 @@ public class FieldConditionRepositoryInfluxDBImpl implements FieldConditionRepos
     private static final String DB_NAME = "field_captures";
     private static final String RETENTION_POLICY = "defaultPolicy";
 
-    // Important Note: watch out for this if tests are failing, because occurrenceAt is very 'old', so are not stored to InfluxDB.
-    private static final String RETENTION_POLICY_PERIOD = "300d";
-
     private final MathProvider mathProvider;
     private final Clock utcClock;
+
+    // Important Note: watch out for this if tests are failing, because occurrenceAt is very 'old', so are not stored to InfluxDB.
+    private final String retentionPolicy;
 
     private final String influxDbUrl;
     private final String influxDbUser;
@@ -62,11 +62,13 @@ public class FieldConditionRepositoryInfluxDBImpl implements FieldConditionRepos
     @Autowired
     public FieldConditionRepositoryInfluxDBImpl(MathProvider mathProvider,
                                                 Clock utcClock,
+                                                @Value("${influx-db.retention-policy}") String retentionPolicy,
                                                 @Value("${influx-db.url}") String influxDbUrl,
                                                 @Value("${influx-db.user}") String influxDbUser,
                                                 @Value("${influx-db.pass}") String influxDbPass) {
         this.mathProvider = mathProvider;
         this.utcClock = utcClock;
+        this.retentionPolicy = retentionPolicy;
 
         this.influxDbUrl = influxDbUrl;
         this.influxDbUser = influxDbUser;
@@ -101,7 +103,7 @@ public class FieldConditionRepositoryInfluxDBImpl implements FieldConditionRepos
 
         influxDB.query(new Query("CREATE RETENTION POLICY " + RETENTION_POLICY
                 + " ON " + DB_NAME
-                + " DURATION " + RETENTION_POLICY_PERIOD
+                + " DURATION " + retentionPolicy
                 + " REPLICATION 1 SHARD DURATION 30m DEFAULT", DB_NAME));
         influxDB.setRetentionPolicy(RETENTION_POLICY);
 

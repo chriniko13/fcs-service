@@ -34,7 +34,7 @@ public class FieldConditionRepositoryInfluxDBImplIT {
         mathProvider = new MathProvider();
 
         fieldConditionRepository = new FieldConditionRepositoryInfluxDBImpl(
-                mathProvider, Clock.systemUTC(), "http://localhost:8086", "user", "123"
+                mathProvider, Clock.systemUTC(), "300d", "http://localhost:8086", "user", "123"
         );
 
         fieldConditionRepository.clear();

@@ -78,6 +78,9 @@ we have used as a tag, a virtual `sensor-id` which is a random UUID.
 * Execute: `mvn clean integration-test -DskipUTs=true` or `mvn clean verify -DskipUTs=true`
 
 
+#### Note on retention policy of Influx's DB
+If tests are failing check the property: `influx-db.retention-policy` and make it bigger (due to the fact that time has passes)
+
 #### Test Coverage (via JaCoCo)
 * In order to generate reports execute: `mvn clean verify`
     * In order to see unit test coverage open with browser: `target/site/jacoco-ut/index.html`
