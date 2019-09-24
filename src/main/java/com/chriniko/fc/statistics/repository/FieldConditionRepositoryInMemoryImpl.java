@@ -116,26 +116,16 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
 
         MergedCapturesCalculationStrategy calculationStrategy;
         if (mergedCapturesCalcSingleThreadApproach) {
-            calculationStrategy = new MergedCapturesCalculationSingleThreadStrategy();
+            calculationStrategy = new MergedCapturesCalculationSingleThreadStrategy(pastDays);
         } else {
-            calculationStrategy = new MergedCapturesCalculationMultiThreadStrategy();
+            calculationStrategy = new MergedCapturesCalculationMultiThreadStrategy(pastDays);
         }
         mergedFieldConditionCaptures = calculationStrategy.calculateMergedCaptures();
 
         List<MergedFieldConditionCapture> result = mergedFieldConditionCaptures
                 .stream()
                 .sorted(Comparator.comparing(MergedFieldConditionCapture::getDate).reversed())
-                .filter(fC -> {
-                    LocalDate nowLocalDate = LocalDate.now(clock);
-
-                    long daysDiff = Duration
-                            .between(
-                                    fC.getDate().atStartOfDay(),
-                                    nowLocalDate.atStartOfDay()
-                            ).toDays();
-
-                    return daysDiff >= 0 && daysDiff <= pastDays;
-                })
+                .filter(fC -> isInLastDays(fC.getDate(), pastDays))
                 .collect(Collectors.toList());
 
         long totalTime = System.nanoTime() - startTime;
@@ -158,33 +148,72 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
         return capturesGroupByDate.entrySet().stream().mapToInt(c -> c.getValue().size()).sum();
     }
 
+    private boolean isInLastDays(LocalDate date, int pastDays) {
+        LocalDate nowLocalDate = LocalDate.now(clock);
+
+        long daysDiff = Duration
+                .between(
+                        date.atStartOfDay(),
+                        nowLocalDate.atStartOfDay()
+                ).toDays();
+
+        return daysDiff >= 0 && daysDiff <= pastDays;
+    }
+
     // ------ internals ------
 
     abstract class MergedCapturesCalculationStrategy {
+        protected final int pastDays;
+
+        protected MergedCapturesCalculationStrategy(int pastDays) {
+            this.pastDays = pastDays;
+        }
+
         protected abstract List<MergedFieldConditionCapture> calculateMergedCaptures();
 
-        MergedFieldConditionCapture calculateMergedCapture(Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry) {
-
-            LocalDate date = entry.getKey();
-            Deque<FieldConditionCapture> captures = entry.getValue();
+        MergedFieldConditionCapture calculateMergedCapture(LocalDate date, ConcurrentLinkedDeque<FieldConditionCapture> captures) {
 
             double avg = captures.stream().mapToDouble(FieldConditionCapture::getVegetation).average().orElse(0.0D);
             avg = mathProvider.scale(avg, 2);
 
             return new MergedFieldConditionCapture(date, avg);
         }
+
+        protected ConcurrentHashMap<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> keepRecordsInLastDays(
+                ConcurrentHashMap<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> input,
+                int pastDays) {
+            return input
+                    .entrySet()
+                    .stream()
+                    .filter(entry -> isInLastDays(entry.getKey(), pastDays))
+                    .collect(
+                            Collectors.toMap(
+                                    Map.Entry::getKey,
+                                    Map.Entry::getValue,
+                                    (captures1, captures2) -> {
+                                        captures1.addAll(captures2);
+                                        return captures1;
+                                    },
+                                    ConcurrentHashMap::new
+                            )
+                    );
+        }
     }
 
     final class MergedCapturesCalculationSingleThreadStrategy extends MergedCapturesCalculationStrategy {
+
+        MergedCapturesCalculationSingleThreadStrategy(int pastDays) {
+            super(pastDays);
+        }
 
         @Override
         public List<MergedFieldConditionCapture> calculateMergedCaptures() {
             final LinkedList<MergedFieldConditionCapture> mergedCaptures = new LinkedList<>();
 
-            for (Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry : capturesGroupByDate.entrySet()) {
-                MergedFieldConditionCapture merged = calculateMergedCapture(entry);
+            keepRecordsInLastDays(capturesGroupByDate, pastDays).forEach((date, captures) -> {
+                MergedFieldConditionCapture merged = calculateMergedCapture(date, captures);
                 mergedCaptures.add(merged);
-            }
+            });
 
             return mergedCaptures;
         }
@@ -195,11 +224,17 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
         private static final long WAIT_TIME_FOR_CALC_IN_MS = 200;
         private static final int PARTITION_SIZE = 10;
 
+        MergedCapturesCalculationMultiThreadStrategy(int pastDays) {
+            super(pastDays);
+        }
+
         @Override
         public List<MergedFieldConditionCapture> calculateMergedCaptures() {
             final ConcurrentLinkedDeque<MergedFieldConditionCapture> mergedCaptures = new ConcurrentLinkedDeque<>();
 
-            List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>> capturesToProcess = new ArrayList<>(capturesGroupByDate.entrySet());
+            ConcurrentHashMap<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> filteredEntries = keepRecordsInLastDays(capturesGroupByDate, pastDays);
+
+            List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>> capturesToProcess = new ArrayList<>(filteredEntries.entrySet());
 
             List<List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>>> capturesToProcessPerWorker = Lists.partition(capturesToProcess, PARTITION_SIZE);
 
@@ -208,16 +243,23 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
             for (List<Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>>> capturesByDate : capturesToProcessPerWorker) {
 
                 Runnable workerTask = () -> {
-                    for (Map.Entry<LocalDate, ConcurrentLinkedDeque<FieldConditionCapture>> entry : capturesByDate) {
-                        MergedFieldConditionCapture merged = calculateMergedCapture(entry);
+                    capturesByDate.forEach(entry -> {
+                        MergedFieldConditionCapture merged = calculateMergedCapture(entry.getKey(), entry.getValue());
                         mergedCaptures.add(merged);
-                    }
+                    });
+
                     calculationFinished.countDown();
                 };
 
                 computationWorkers.submit(workerTask);
             }
 
+            wait(calculationFinished);
+
+            return new LinkedList<>(mergedCaptures);
+        }
+
+        private void wait(CountDownLatch calculationFinished) {
             boolean reachedZero = false;
             try {
                 reachedZero = calculationFinished.await(WAIT_TIME_FOR_CALC_IN_MS, TimeUnit.MILLISECONDS);
@@ -230,7 +272,6 @@ public class FieldConditionRepositoryInMemoryImpl implements FieldConditionRepos
             if (!reachedZero) {
                 throw new BusinessProcessingException("processing of merged captures failed");
             }
-            return new LinkedList<>(mergedCaptures);
         }
     }
 

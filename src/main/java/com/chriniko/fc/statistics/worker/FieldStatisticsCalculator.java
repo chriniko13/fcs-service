@@ -83,6 +83,7 @@ public class FieldStatisticsCalculator {
         try {
             List<MergedFieldConditionCapture> mergedCaptures = fieldConditionRepository.findAllMergedOrderByOccurrenceDesc(pastDays);
             if (mergedCaptures.isEmpty()) {
+                fieldConditionRepository.updateVegetationStatistics(new VegetationStatistic());
                 return;
             }
 
